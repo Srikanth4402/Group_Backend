@@ -16,7 +16,7 @@ const protect = asyncHandler(async (req, res, next) => {
 
             req.user = await User.findById(decoded.user.id).select('-password');
             console.log(decoded.user.id, req.user);
-            // console.log(req.user);  
+            console.log(req.user);  
             if (!req.user) {
                 res.status(401);
                 throw new Error('Not authorized, user not found');
