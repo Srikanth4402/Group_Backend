@@ -16,9 +16,9 @@ pipeline {
       steps {
         script {
           sh """
-            docker build -t ${REGISTRY_IMAGE}:${IMAGE_TAG} -t $
- {REGISTRY_IMAGE}:latest .
-          """
+            docker build -t ${REGISTRY_IMAGE}:${IMAGE_TAG} -t ${REGISTRY_IMAGE}:latest .
+        """
+
         }
       }
     }
