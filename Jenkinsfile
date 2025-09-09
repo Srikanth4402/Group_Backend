@@ -2,12 +2,9 @@ pipeline {
     agent any
 
     environment {
-        DOCKERHUB_USER = credentials('dockerhub-creds') // Jenkins credentials ID for DockerHub
-        EC2_USER = 'ubuntu'
-        EC2_HOST = 'your-ec2-public-ip'
-        EC2_KEY = credentials('ec2-ssh-key') // SSH private key stored in Jenkins
         APP_NAME = 'node-auth-api'
-        REPO = 'yourdockerhubuser/node-auth-api'
+        REPO = 'srikanth4402/group-ecomm-backend'
+        EC2_HOST = '51.21.211.112'
     }
 
     stages {
@@ -47,7 +44,7 @@ pipeline {
             steps {
                 sshagent(['ec2-ssh-key']) {
                     sh """
-                        ssh -o StrictHostKeyChecking=no ${EC2_USER}@${EC2_HOST} "
+                        ssh -o StrictHostKeyChecking=no ubuntu@${EC2_HOST} "
                             docker pull ${REPO}:latest &&
                             docker stop ${APP_NAME} || true &&
                             docker rm ${APP_NAME} || true &&
