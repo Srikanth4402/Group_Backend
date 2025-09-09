@@ -11,7 +11,7 @@ pipeline {
         stage('Checkout') {
             steps {
                 git branch: 'main',
-                    credentialsId: 'group-project-backend',
+                    credentialsId: 'dockerhub-creds',
                     url: 'https://github.com/Srikanth4402/Group_Backend.git'
             }
         }
