@@ -14,4 +14,4 @@ FROM node:18-alpine
  RUN npm ci --omit=dev
  COPY --from=build /app ./
  EXPOSE 8000
- CMD ["node", "src/server.js"]
+ CMD ["node", "src/index.js"]
