@@ -97,7 +97,7 @@ export const createUser = async (req, res) => {
   }
 };
 
-// ================== GET ALL USERS ==================
+
 export const getUsers = async (req, res) => {
   try {
     const users = await User.find().select("-password");
