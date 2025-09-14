@@ -8,6 +8,22 @@ import { sendMail } from "../utils/MailSender.js";
 const generateOtp = () =>
   Math.floor(100000 + Math.random() * 900000).toString();
 
+const buildItemsSummaryText = (items = []) =>
+  items
+    .map(
+      (it) =>
+        `${it.title || (it.productId && it.productId.name) || "Item"} — Qty: ${it.quantity} — Price: ${it.price}`
+    )
+    .join("\n");
+
+const buildItemsSummaryHtml = (items = []) =>
+  `<ul>${items
+    .map(
+      (it) =>
+        `<li>${it.title || (it.productId && it.productId.name) || "Item"} — Qty: ${it.quantity} — Price: ${it.price}</li>`
+    )
+    .join("")}</ul>`;
+
 /* -----------------------------------------
  * Create Order
  * ----------------------------------------- */
@@ -36,6 +52,35 @@ export const createOrder = async (req, res) => {
       shippingAddress,
     });
 
+    // send confirmation email to user (non-blocking but awaited so we can log errors)
+    try {
+      const text = `Hi ${user.username || "Customer"},\n\nYour order has been placed successfully.\n\nOrder ID: ${newOrder._id}\nStatus: ${newOrder.status}\nTotal: ${newOrder.totalAmount}\n\nItems:\n${buildItemsSummaryText(newOrder.items)}\n\nShipping Address:\n${JSON.stringify(newOrder.shippingAddress, null, 2)}\n\nThank you for shopping with us.`;
+      const html = `
+        <div style="font-family:Arial,sans-serif;color:#222;">
+          <h2>Order Confirmation</h2>
+          <p>Hi ${user.username || "Customer"},</p>
+          <p>Your order has been placed successfully.</p>
+          <p><strong>Order ID:</strong> ${newOrder._id}</p>
+          <p><strong>Status:</strong> ${newOrder.status}</p>
+          <p><strong>Total:</strong> ${newOrder.totalAmount}</p>
+          <p><strong>Items:</strong></p>
+          ${buildItemsSummaryHtml(newOrder.items)}
+          <p><strong>Shipping Address:</strong></p>
+          <pre>${JSON.stringify(newOrder.shippingAddress, null, 2)}</pre>
+          <hr/>
+          <p style="color:#666">E-Commerce Team</p>
+        </div>
+      `;
+      await sendMail({
+        to: user.email,
+        subject: "Order Confirmation — Thank you for your purchase",
+        text,
+        html,
+      });
+    } catch (mailErr) {
+      console.error("Failed to send order confirmation email:", mailErr);
+    }
+
     return res.status(200).json({
       message: "Order created successfully",
       order: newOrder,
@@ -46,10 +91,6 @@ export const createOrder = async (req, res) => {
   }
 };
 
-/* -----------------------------------------
- * Get orders for logged-in user (formatted for frontend)
- * Returns: [{ id, date, totalAmount, status, items: [{productId, title, quantity, price, image}] }]
- * ----------------------------------------- */
 export const getOrdersForUser = async (req, res) => {
   try {
     const orders = await Order.find({ userId: req.user._id }).populate(
@@ -107,7 +148,6 @@ export const getAllOrders = async (req, res) => {
   }
 };
 
-
 export const updateOrderStatus = async (req, res) => {
   try {
     const { orderId } = req.params;
@@ -127,7 +167,7 @@ export const updateOrderStatus = async (req, res) => {
       // (Re)generate OTP whenever shipping is set
       const otp = generateOtp();
       order.deliveryOtp = otp;
-      order.otpExpiresAt = Date.now() + 1 * 24 * 60 * 60 * 1000; // 1 day
+      order.otpExpiresAt = Date.now() + 10 * 60 * 1000; // 10 minutes (match email text)
       order.status = "Shipped";
       await order.save();
 
@@ -144,12 +184,16 @@ export const updateOrderStatus = async (req, res) => {
         </div>
       `;
 
-      await sendMail({
-  to: order.userId.email,
-  subject: "Your Delivery OTP",
-  text: `Your delivery OTP is ${otp}. Valid for 10 minutes. Order: ${order._id}`,
-  html: `<p>Your OTP: <b>${otp}</b></p>`,
-});
+      try {
+        await sendMail({
+          to: order.userId.email,
+          subject: "Your Delivery OTP",
+          text: `Your delivery OTP is ${otp}. Valid for 10 minutes. Order: ${order._id}`,
+          html,
+        });
+      } catch (mailErr) {
+        console.error("Failed to send delivery OTP email:", mailErr);
+      }
 
       return res.status(200).json({
         message: "Order updated to Shipped. OTP sent to user.",
@@ -157,8 +201,32 @@ export const updateOrderStatus = async (req, res) => {
       });
     }
 
+    // For other statuses (Processing, Cancelled, Return Requested, etc.) update and notify
     order.status = status;
     await order.save();
+
+    // Notify user about status change
+    try {
+      const text = `Hi ${order.userId.username || "Customer"},\n\nYour order status has been updated.\n\nOrder ID: ${order._id}\nNew Status: ${order.status}\n\nThank you.`;
+      const html = `
+        <div style="font-family:Arial,sans-serif;color:#222">
+          <p>Hi ${order.userId.username || "Customer"},</p>
+          <p>Your order <strong>${order._id}</strong> status has been updated to <strong>${order.status}</strong>.</p>
+          <p>Thanks for shopping with us.</p>
+          <hr/>
+          <p style="color:#666">E-Commerce Team</p>
+        </div>
+      `;
+      await sendMail({
+        to: order.userId.email,
+        subject: `Order Update — ${order.status}`,
+        text,
+        html,
+      });
+    } catch (mailErr) {
+      console.error("Failed to send order status update email:", mailErr);
+    }
+
     res.status(200).json({ message: "Status updated", order });
   } catch (error) {
     console.error("Error updating order status:", error);
@@ -171,13 +239,10 @@ export const updateOrderStatus = async (req, res) => {
  * ----------------------------------------- */
 export const verifyDeliveryOtp = async (req, res) => {
   try {
-    // console.log("Verifying OTP with data:", req.params, req.body);
     const { orderId } = req.params;
     const { userOtp } = req.body;
 
     const order = await Order.findById(orderId);
-    // console.log("Found order:", order);
-
     if (!order) return res.status(404).json({ message: "Order not found" });
 
     if (order.status !== "Shipped") {
@@ -199,6 +264,30 @@ export const verifyDeliveryOtp = async (req, res) => {
     order.otpExpiresAt = null;
     await order.save();
 
+    // Notify user about successful delivery
+    try {
+      // get user email/username (populate if necessary)
+      const user = await User.findById(order.userId).select("email username");
+      const text = `Hi ${user?.username || "Customer"},\n\nYour order ${order._id} has been delivered successfully.\n\nThank you for shopping with us.`;
+      const html = `
+        <div style="font-family:Arial,sans-serif;color:#222">
+          <p>Hi ${user?.username || "Customer"},</p>
+          <p>Your order <strong>${order._id}</strong> has been delivered successfully.</p>
+          <p>We hope you enjoy your purchase.</p>
+          <hr/>
+          <p style="color:#666">E-Commerce Team</p>
+        </div>
+      `;
+      await sendMail({
+        to: user?.email,
+        subject: "Order Delivered — Thank you",
+        text,
+        html,
+      });
+    } catch (mailErr) {
+      console.error("Failed to send delivery confirmation email:", mailErr);
+    }
+
     res.status(200).json({ message: "OTP verified. Order delivered.", order });
   } catch (error) {
     console.error("Error verifying OTP:", error);
@@ -214,7 +303,7 @@ export const cancelOrderItem = async (req, res) => {
     const { id } = req.params;
     const { productId } = req.body;
 
-    const order = await Order.findById(id);
+    const order = await Order.findById(id).populate("userId", "email username");
     if (!order) return res.status(404).json({ message: "Order not found" });
 
     const idx = order.items.findIndex((i) => i.productId.toString() === productId);
@@ -226,6 +315,32 @@ export const cancelOrderItem = async (req, res) => {
     if (order.items.length === 0) order.status = "Cancelled";
 
     await order.save();
+
+    // Notify user about item cancellation
+    try {
+      const text = `Hi ${order.userId.username || "Customer"},\n\nAn item was removed from your order ${order._id}.\n\nRemoved Item: ${item.title || item.productId}\nQuantity: ${item.quantity}\n\nNew total: ${order.totalAmount}\n\nIf you didn't request this, contact support.`;
+      const html = `
+        <div style="font-family:Arial,sans-serif;color:#222">
+          <p>Hi ${order.userId.username || "Customer"},</p>
+          <p>The following item was removed from your order <strong>${order._id}</strong>:</p>
+          <ul>
+            <li>${item.title || item.productId} — Qty: ${item.quantity} — Price: ${item.price}</li>
+          </ul>
+          <p><strong>New total:</strong> ${order.totalAmount}</p>
+          <hr/>
+          <p style="color:#666">E-Commerce Team</p>
+        </div>
+      `;
+      await sendMail({
+        to: order.userId.email,
+        subject: "Order Update — Item Removed",
+        text,
+        html,
+      });
+    } catch (mailErr) {
+      console.error("Failed to send item cancellation email:", mailErr);
+    }
+
     res.status(200).json({ message: "Item removed", order });
   } catch (error) {
     console.error("Cancel error:", error);
@@ -248,19 +363,39 @@ export const getOrderStatus = async (req, res) => {
   }
 };
 
-
-export const requestReturn=async (req,res)=>{
+export const requestReturn = async (req, res) => {
   try {
     const { id } = req.params;
-    const order = await Order.findById(id);
+    const order = await Order.findById(id).populate("userId", "email username");
     if (!order) return res.status(404).json({ message: "Order not found" });
 
     order.status = "Return Requested";
     await order.save();
+
+    // Notify user about return request accepted
+    try {
+      const text = `Hi ${order.userId.username || "Customer"},\n\nWe've received your return request for order ${order._id}. Our team will review and contact you with the next steps.\n\nThank you.`;
+      const html = `
+        <div style="font-family:Arial,sans-serif;color:#222">
+          <p>Hi ${order.userId.username || "Customer"},</p>
+          <p>We've received your return request for order <strong>${order._id}</strong>. Our team will review and contact you with the next steps.</p>
+          <hr/>
+          <p style="color:#666">E-Commerce Team</p>
+        </div>
+      `;
+      await sendMail({
+        to: order.userId.email,
+        subject: "Return Request Received",
+        text,
+        html,
+      });
+    } catch (mailErr) {
+      console.error("Failed to send return request email:", mailErr);
+    }
 
     res.status(200).json({ message: "Return requested", order });
   } catch (error) {
     console.error("Request return error:", error);
     res.status(500).json({ message: "Failed to request return" });
   }
-};  
+};
