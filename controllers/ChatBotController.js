@@ -121,7 +121,7 @@ function localOrderStatusReply(order) {
   // Short privacy-safe info
   const shipping = redactAddress(order.shippingAddress);
   const totalStr = order.totalAmount != null ? formatINR(order.totalAmount) : 'unknown';
-  reply += `\n\nOrder summary: ${(order.items || []).map(i => i.title).slice(0,3).join(', ') || 'No items listed'} — Total: ₹${totalStr} — Delivery location: ${shipping}`;
+  reply += `\n\nOrder summary: ${(order.items || []).map(i => i.title).slice(0,3).join(', ') || 'No items listed'} — Total: ${totalStr} — Delivery location: ${shipping}`;
 
   return reply;
 }
